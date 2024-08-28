@@ -303,11 +303,16 @@ func (d *Decoder) unmarshalAttr(val reflect.Value, attr Attr) error {
 	return copyValue(val, []byte(attr.Value))
 }
 
+type UnmarshalConstructor interface {
+	UnmarshalXMLConstruct(Name) any
+}
+
 var (
-	attrType            = reflect.TypeFor[Attr]()
-	unmarshalerType     = reflect.TypeFor[Unmarshaler]()
-	unmarshalerAttrType = reflect.TypeFor[UnmarshalerAttr]()
-	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
+	attrType                 = reflect.TypeFor[Attr]()
+	unmarshalerType          = reflect.TypeFor[Unmarshaler]()
+	unmarshalerAttrType      = reflect.TypeFor[UnmarshalerAttr]()
+	textUnmarshalerType      = reflect.TypeFor[encoding.TextUnmarshaler]()
+	unmarshalConstructorType = reflect.TypeFor[UnmarshalConstructor]()
 )
 
 const (
@@ -721,6 +726,26 @@ Loop:
 		}
 	}
 	if !recurse {
+		// We didn't find a relevant field, try UnmarshalConstructor
+		var unmarshalConstructor UnmarshalConstructor
+		if sv.CanInterface() && sv.Type().Implements(unmarshalConstructorType) {
+			unmarshalConstructor = sv.Interface().(UnmarshalConstructor)
+		}
+
+		if sv.CanAddr() {
+			pv := sv.Addr()
+			if pv.CanInterface() && pv.Type().Implements(unmarshalConstructorType) {
+				unmarshalConstructor = pv.Interface().(UnmarshalConstructor)
+			}
+		}
+
+		if unmarshalConstructor != nil {
+			constructed := unmarshalConstructor.UnmarshalXMLConstruct(start.Name)
+			if constructed != nil {
+				return true, d.unmarshal(reflect.ValueOf(constructed), start, depth+1)
+			}
+		}
+
 		// We have no business with this element.
 		return false, nil
 	}

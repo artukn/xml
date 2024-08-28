@@ -7,6 +7,7 @@ package xml
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"runtime"
@@ -1125,4 +1126,72 @@ func TestCVE202230633(t *testing.T) {
 		Things []string
 	}
 	Unmarshal(bytes.Repeat([]byte("<a>"), 17_000_000), &example)
+}
+
+type InterfaceImplementation1 struct {
+	A string `xml:"a"`
+}
+
+func (ii InterfaceImplementation1) String() string {
+	return "1:" + ii.A
+}
+
+type InterfaceImplementation2 struct {
+	B int `xml:"b"`
+}
+
+func (ii InterfaceImplementation2) String() string {
+	return fmt.Sprintf("2:%d", ii.B)
+}
+
+type InterfaceUnmarshalConstructor struct {
+	list []fmt.Stringer
+	elem fmt.Stringer
+}
+
+func (c *InterfaceUnmarshalConstructor) UnmarshalXMLConstruct(name Name) any {
+	fmt.Printf("UC: %s\n", name.Local)
+	switch name.Local {
+	case "ii1":
+		ii := &InterfaceImplementation1{}
+		c.list = append(c.list, ii)
+		return ii
+	case "ii2":
+		ii := &InterfaceImplementation2{}
+		c.list = append(c.list, ii)
+		return ii
+	case "el":
+		ii := &InterfaceImplementation2{}
+		c.elem = ii
+		return ii
+	}
+	return nil
+}
+
+func TestUnmarshalIntoDefinedInterface(t *testing.T) {
+	var container InterfaceUnmarshalConstructor
+	err := Unmarshal([]byte("<container><ii1><a>a1</a></ii1><ii2><b>15</b></ii2><ii1><a>a2</a></ii1><el><b>3</b></el></container>"), &container)
+	if err != nil {
+		t.Errorf("Unmarshal: %v", err)
+	}
+	if container.elem == nil {
+		t.Errorf("Failed to unmarshal elem, want %s", InterfaceImplementation2{3})
+	} else if container.elem.String() != "2:3" {
+		t.Errorf("Failed to unmarshal elem, got %s, want %s", container.elem, InterfaceImplementation2{3})
+	}
+	if len(container.list) != 3 {
+		t.Errorf("List length %d, want 3", len(container.list))
+		return
+	}
+	wants := []string{
+		"1:a1",
+		"2:15",
+		"1:a2",
+	}
+	for i, elem := range container.list {
+		want := wants[i]
+		if elem.String() != want {
+			t.Errorf("List element %d, got %s, want %s", i, elem.String(), want)
+		}
+	}
 }
